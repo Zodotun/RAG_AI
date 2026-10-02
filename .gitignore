@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Downloaded wiki text and the vector database built from it.
+# Both are large and rebuilt on each machine (see docs/warframe-wiki-data.md).
+data/
+chroma_db/
+
+# Secrets / editor files
+.env
+.idea/
+.vscode/
