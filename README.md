@@ -1,2 +1,2 @@
-# RAG_AI_TCG
+# RAG_AI
 Personal Project
