@@ -26,6 +26,12 @@ function Find-Python {
         "C:\Program Files\Python312\python.exe"
     )
     foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    # Microsoft Store and other installs are only reachable through the py launcher.
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $ErrorActionPreference = 'Continue'
+        $exe = & py -3.12 -c "import sys; print(sys.executable)" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $exe) { return $exe.Trim() }
+    }
     return $null
 }
 
