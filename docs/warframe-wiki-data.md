@@ -41,13 +41,13 @@ Whole project on one PC:
 ## Why plain wikitext isn't enough
 Many stats (weapon damage, Warframe abilities, drop tables) aren't in the page source. Pages call templates and Lua modules that fill the numbers in at render time. We need the **rendered** text (`action=parse`, or the TextExtracts extension, which is installed), not the raw wikitext.
 
-## Getting the data — open question
+## Getting the data — how `fetch_wiki.py` does it (2026-10-15)
 - There is **no official full database dump** for the new wiki. `Special:Export` exports individual pages as wikitext only.
-- The MediaWiki API works (`https://wiki.warframe.com/api.php`), but the wiki's `robots.txt` has `Disallow: /*api.php`. That's aimed at crawlers, but it means **a bulk download should be slow and polite**, or cleared with the wiki admins first:
-  - a descriptive `User-Agent` naming this project
-  - one request at a time, ~1 per second, with `maxlag=5`
-  - ~11k pages at that rate is **~3 hours, done once**. After that, fetch only pages changed since the last run (`list=recentchanges`).
-- Decide before writing the downloader: ask on the wiki (or its Discord) whether bulk API use for a personal project is OK.
+- The wiki's `robots.txt` disallows `/*api.php`, `/*?action=`, `/w/Special:` and the REST endpoints, so the downloader uses **none of them**. It only requests normal article pages (`/w/<Title>`) and category pages (`/w/Category:<Name>`), which robots.txt allows. Category pages give the list of articles to fetch.
+- It stays polite: a `User-Agent` naming this project and its GitHub URL, one request at a time, 1 second apart, backing off on `429`/`5xx`.
+- The starter set (Warframes, Warframe Abilities, Primary/Secondary/Melee Weapons; `Conclave:` PvP pages skipped) is ~1,500 pages, ~25 minutes, ~10 MB of text.
+- The full wiki (~11k pages) would take ~3 hours at this rate. Still worth a courtesy message on the wiki or its Discord before doing a full download.
+- Not done yet: incremental updates. `--refresh` re-downloads everything; a smarter version could compare each page's `revision` (saved in the file header) to the live one.
 
 ## How this fits the project steps
 Step 3 ("load documents") becomes three parts:
@@ -58,7 +58,8 @@ Step 3 ("load documents") becomes three parts:
 
 `data/` and `chroma_db/` are in `.gitignore`. The wiki text is large, licensed separately and easy to re-download, so **each computer fetches its own copy** by running the script. Only code goes to GitHub.
 
-### Rough timings on this PC (CPU only, no usable GPU)
-- Fetch: ~3 hours once, minutes for later updates.
-- Embedding: roughly 15 minutes to 2 hours depending on chunk count. Test on a small slice first, e.g. 200 Warframe and weapon pages.
-- Answers from `llama3.2:3b` on CPU: a few seconds to ~30 seconds each.
+### Measured timings (2026-10-15, RTX 3080)
+- Fetch: 1 page/second by design.
+- Embedding: 125 chunks in 4 seconds with `embed_batch_size=64` (it took 67 s with the default batch of 10). The starter set is ~5 chunks per page.
+- Answers from `llama3.2:3b`: ~28 s for the first question including model load, faster after. Capping `context_window` at 8192 matters: without it the model was loaded with a 131k context (18 GB) and spilled half onto the CPU.
+- CPU-only machines will be noticeably slower at both embedding and answering.

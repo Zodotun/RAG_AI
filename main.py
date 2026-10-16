@@ -1,66 +1,60 @@
-import json, logging, shutil
-from pathlib import Path
+"""Ask questions about Warframe, answered from the wiki pages in chroma_db/ (built by ingest.py).
 
-from llama_index.core import Document, StorageContext, VectorStoreIndex, SimpleDirectoryReader
-from llama_index.core.node_parser import SentenceSplitter
-from llama_index.core.retrievers import VectorIndexRetriever
-from llama_index.embeddings.ollama import OllamaEmbedding
-from llama_index.llms.ollama import Ollama
-from llama_index.vector_stores.chroma import ChromaVectorStore
+  python main.py "What does Excalibur's Exalted Blade do?"
+  python main.py                 # interactive: type questions, empty line to quit
+"""
+import logging
+import sys
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    datefmt='%d-%b-%y %H:%M:%S')
+from llama_index.core import PromptTemplate, VectorStoreIndex
 
-logging.info("Fully loaded imports")
+from config import cfg, use_local_models, vector_store
 
-cfg = {
-    "llm": {
-        "model": "llama3.2:3b",
-        "base_url": "http://localhost:11434",
-        "temperature": 0.0,
-        "request_timeout": 120.0,
-    },
-    "embedding": {
-        "model": "nomic-embed-text",
-        "base_url": "http://localhost:11434",
-    },
-    "splitter": {
-        "chunk_size": 512,
-        "chunk_overlap": 50,
-    },
-    "chroma": {
-        "persist_dir": "./chroma_db",
-        "collection_name": "ai_safety_rag",
-    },
-    "retrieval": {
-        "similarity_top_k": 3,
-    },
-}
-print(json.dumps(cfg, indent=2))
+logging.basicConfig(level=logging.WARNING)
 
-llm = Ollama(
-    model=cfg["llm"] + cfg["model"],
-    base_url=cfg["llm"] + cfg["base_url"],
-    temperature=cfg["llm"]+ cfg["temperature"],
-    request_timeout=cfg["llm"] + cfg["request_timeout"]
+QA_PROMPT = PromptTemplate(
+    "You answer questions about the video game Warframe using only the wiki excerpts below.\n"
+    "If the excerpts don't contain the answer, say you don't know. Don't make up stats or numbers.\n"
+    "Keep the answer short.\n\n"
+    "Wiki excerpts:\n"
+    "---------------------\n"
+    "{context_str}\n"
+    "---------------------\n"
+    "Question: {query_str}\n"
+    "Answer: "
 )
 
-CORPUS_TEXT = ""
 
-# TODO: Insert the directory that the LLM will be ingesting
-documents = [Document(text=CORPUS_TEXT, metadata={"source": "warframe wiki"})]
-
-splitter = SentenceSplitter(
-    chunk_size=cfg["splitter"]["chunk_size"],
-    chnk_overlap=cfg["splitter"]["chunk_overlap"]
-)
-
-nodes = splitter.get_nodes_from_documents(documents)
+def build_query_engine():
+    use_local_models()
+    store = vector_store()
+    if store._collection.count() == 0:
+        raise SystemExit("The database is empty. Run `python fetch_wiki.py` then `python ingest.py` first.")
+    index = VectorStoreIndex.from_vector_store(store)
+    return index.as_query_engine(similarity_top_k=cfg["retrieval"]["similarity_top_k"],
+                                 text_qa_template=QA_PROMPT)
 
 
-# Pull the data from your chosen directory
-index = VectorStoreIndex()
+def ask(engine, question):
+    response = engine.query(question)
+    print(f"\n{str(response).strip()}\n\nSources:")
+    seen = set()
+    for hit in response.source_nodes:
+        title, url = hit.node.metadata.get("title"), hit.node.metadata.get("url", "")
+        if title not in seen:
+            seen.add(title)
+            print(f"  {hit.score:.2f}  {title}  {url}")
+    print()
 
-# We do query since we're not necessarily finding files
-query_engine = index.as_query_engine()
 
+def main():
+    engine = build_query_engine()
+    if len(sys.argv) > 1:
+        ask(engine, " ".join(sys.argv[1:]))
+        return
+    while question := input("Question (empty to quit): ").strip():
+        ask(engine, question)
+
+
+if __name__ == "__main__":
+    main()
